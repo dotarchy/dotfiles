@@ -111,11 +111,37 @@
       "Bash(/bin/cat -A)",
       "Bash(ssh *)",
       "Bash(sshpass -V)",
-      "Bash(glow --version)"
+      "Bash(glow --version)",
+      "Bash(ways:*)",
+      "Bash(attend:*)",
+      "Bash(attend-chat:*)",
+      "Bash(way-embed:*)",
+      "Edit(~/.claude/**)"
     ],
     "deny": [
       "Read(~/.config/gh/**)",
-      "Read(~/.docker/config.json)"
+      "Read(~/.docker/config.json)",
+      "Read(~/.ssh/id_*)",
+      "Read(~/.ssh/*_priv)",
+      "Read(~/.ssh/*_key)",
+      "Read(~/.ssh/*.pem)",
+      "Read(~/.ssh/google_compute_engine)",
+      "Read(~/.ssh/authorized_keys)",
+      "Edit(~/.ssh/id_*)",
+      "Edit(~/.ssh/*_priv)",
+      "Edit(~/.ssh/*_key)",
+      "Edit(~/.ssh/*.pem)",
+      "Edit(~/.ssh/*.pub)",
+      "Edit(~/.ssh/google_compute_engine)",
+      "Edit(~/.ssh/authorized_keys)",
+      "Edit(~/.ssh/known_hosts)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.kube/config)",
+      "Read(~/.netrc)",
+      "Read(./.env)",
+      "Read(./.env.local)"
     ]
   }
 }
