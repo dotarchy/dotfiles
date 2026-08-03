@@ -2,8 +2,17 @@
 # Third-party plugins — load order matters (syntax-highlighting before history-substring-search)
 
 _plug=/usr/share/zsh/plugins
-[[ -r "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] \
-  && source "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh"
+
+# --- zsh-autosuggestions: disabled while clicue owns ghost text ---
+# Both write POSTDISPLAY for the same purpose — proposing what you probably want.
+# autosuggestions computes asynchronously (zle -F), so whichever landed last won:
+# the ghost went grey and the cue card's rendering broke. clicue draws the ghost
+# now, and Right Arrow / End still accept it.
+#
+# Revert = uncomment, and clicue will co-tenant again via its wrapper mitigations.
+# [[ -r "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] \
+#   && source "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh"
+
 [[ -r "$_plug/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] \
   && source "$_plug/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 [[ -r "$_plug/zsh-history-substring-search/zsh-history-substring-search.zsh" ]] \
