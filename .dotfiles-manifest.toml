@@ -126,6 +126,12 @@ path = "claude/statusline.sh"
 target = ".claude/statusline.sh"
 why = "Status line renderer (dir, git branch, owner/repo, time). A file artifact, not a settings key: the claude/settings.d statusLine fragment points at it. Owned in dotfiles so it travels across hosts (ADR-010 / ADR-163 artifact-ownership split)."
 
+[[entry]]
+name = "tealdeer"
+path = "tealdeer/config.toml"
+target = ".config/tealdeer/config.toml"
+why = "tealdeer keeps tldr pages in a local cache, so the pages go stale silently rather than loudly — a lookup just returns yesterday's flags. auto_update turns that failure mode into a 30-day refresh. Carried per-machine because the cache is per-machine, and a fresh box would otherwise inherit the offline speed without the freshness."
+
 [profiles.north]
 
 [profiles.slab]

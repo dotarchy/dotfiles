@@ -1,0 +1,6 @@
+# tealdeer — Rust tldr client
+# Cache is a local snapshot of tldr-pages; without auto-update it silently rots.
+
+[updates]
+auto_update = true
+auto_update_interval_hours = 720  # 30 days

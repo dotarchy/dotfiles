@@ -149,6 +149,7 @@ krfb
 kscreen
 kwallet-pam
 kwayland-integration
+lazydocker
 less
 libappindicator
 libdvdcss
@@ -157,12 +158,14 @@ libguestfs
 libopenraw
 libreoffice-fresh
 libva-intel-driver
+libva-utils
 libvirt
 linux
 linux-firmware
 linux-headers
 linux-lts
 linux-lts-headers
+llama-cpp
 logrotate
 lsb-release
 lsd
@@ -175,6 +178,7 @@ man-pages
 mc
 mdadm
 meld
+mermaid-cli
 mesa-utils
 modemmanager
 mtools
@@ -236,7 +240,9 @@ python-defusedxml
 python-flake8
 python-hatchling
 python-jinja
+python-openpyxl
 python-packaging
+python-pandas
 python-pipx
 qemu-full
 qpwgraph
@@ -269,6 +275,7 @@ sysstat
 system-config-printer
 systemd-sysvcompat
 tcpdump
+tealdeer
 television
 testdisk
 texinfo
@@ -276,7 +283,6 @@ texlive-fontsrecommended
 texlive-latexextra
 texlive-xetex
 timeshift
-tldr
 tlp
 tlp-rdw
 tmux

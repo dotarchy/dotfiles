@@ -5,12 +5,12 @@ easy-zsh-config
 etcher-bin
 fabric-ai-bin
 google-chrome
-lazydocker-bin
 logseq-desktop-bin
 marktext-bin
 mdcat
 mmaid
 mmm
+novnc
 oh-my-posh
 qrc-bin
 slack-desktop-wayland
