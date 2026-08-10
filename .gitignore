@@ -27,3 +27,4 @@
 
 # Machine-specific active profile marker (set by `dotfiles profile use`)
 .dotfiles-profile
+/pacrat/
