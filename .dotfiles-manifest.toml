@@ -132,6 +132,12 @@ path = "tealdeer/config.toml"
 target = ".config/tealdeer/config.toml"
 why = "tealdeer keeps tldr pages in a local cache, so the pages go stale silently rather than loudly — a lookup just returns yesterday's flags. auto_update turns that failure mode into a 30-day refresh. Carried per-machine because the cache is per-machine, and a fresh box would otherwise inherit the offline speed without the freshness."
 
+[[entry]]
+name = "claude-output-styles"
+path = "claude/output-styles"
+target = ".claude/output-styles"
+why = "Claude Code output styles are personal voice configuration — how Claude sounds, not how it works. Versioned here rather than in agent-ways: voice is operator taste, and the repo ships method."
+
 [profiles.north]
 
 [profiles.slab]
