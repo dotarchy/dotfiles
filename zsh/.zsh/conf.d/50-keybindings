@@ -37,3 +37,9 @@ bindkey '^[[1;5C' forward-word
 bindkey '^H' backward-kill-word
 # Shift-Tab → undo
 bindkey '^[[Z' undo
+
+# Ctrl-Space → take the whole ghost suggestion without reaching for End.
+# Right Arrow and End already accept it (autosuggestions wraps forward-char and
+# end-of-line), and Ctrl-Left/Right take it one word at a time. Guarded on the
+# widget so a box without the plugin package installed still starts clean.
+(( ${+widgets[autosuggest-accept]} )) && bindkey '^ ' autosuggest-accept

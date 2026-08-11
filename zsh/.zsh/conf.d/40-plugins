@@ -3,15 +3,22 @@
 
 _plug=/usr/share/zsh/plugins
 
-# --- zsh-autosuggestions: disabled while clicue owns ghost text ---
-# Both write POSTDISPLAY for the same purpose — proposing what you probably want.
-# autosuggestions computes asynchronously (zle -F), so whichever landed last won:
-# the ghost went grey and the cue card's rendering broke. clicue draws the ghost
-# now, and Right Arrow / End still accept it.
+# --- ghost text ---
+# Suggest from history first, falling back to what completion would offer, so a
+# command you have never typed still ghosts. Cap the buffer: the strategy re-runs
+# per keystroke and gets expensive on very long lines.
 #
-# Revert = uncomment, and clicue will co-tenant again via its wrapper mitigations.
-# [[ -r "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] \
-#   && source "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh"
+# Sourced before syntax-highlighting on purpose — autosuggestions wraps the
+# widgets that exist when it loads, and highlighting wants to be last.
+#
+# Anything else that wants POSTDISPLAY (a cue-card tool, an LLM suggester) will
+# fight this one for the ghost. That is the other tool's business to arrange
+# from its own install, not something this config accommodates.
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=25
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+[[ -r "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] \
+  && source "$_plug/zsh-autosuggestions/zsh-autosuggestions.zsh"
 
 [[ -r "$_plug/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] \
   && source "$_plug/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
