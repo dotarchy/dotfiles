@@ -24,6 +24,31 @@ This is a dotfiles repository for managing configuration files across machines. 
 - `dotfiles enable/disable <app>` - Toggle specific configs
 - `dotfiles list` - Show all managed configs
 - `dotfiles pull` - Fast-forward the store, then self-update the CLI to `.dotfiles-cli.version`
+- `dotfiles push -m "<message>"` - Commit and push the store to origin
+
+### Committing: use `dotfiles push`, not raw git
+
+**Commit this repo with `dotfiles push -m "<message>"`.** It is the tool's own
+surface for the operation and it pushes to origin in the same step, so the
+store and its remote never drift. Don't hand-roll `git add && git commit &&
+git push` here.
+
+The message follows the Git Commit Guidelines below — `dotfiles push` does not
+relax them, it just carries them.
+
+**It stages the entire working tree** (`git add -A` internally), so there is no
+way to commit a subset of the changes. Two consequences worth checking before
+every push:
+
+- **Run `git status` first.** Anything uncommitted rides along in the commit.
+  If unrelated work is in flight, either fold it in deliberately and write a
+  message that covers it, or land it separately first.
+- **Untracked cruft must be gitignored, not just left alone.** A stray backup
+  directory sitting in the tree will be committed on the next push. Add it to
+  `.gitignore` the moment it appears.
+
+`dotfiles diff` previews local state against origin (uncommitted changes plus
+ahead/behind) and is the cheap way to see what a push would carry.
 
 ### Keeping the CLI in step with the store
 

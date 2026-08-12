@@ -2,6 +2,10 @@
 
 # Backup directories
 .dotfiles-backup/
+# One-time migration backups left in place on disk, never tracked
+# (`dotfiles push` stages everything, so untracked cruft must be ignored here)
+zsh/.zsh/conf.d.bak-*/
+zsh/.zsh/easy-zsh-config-removed-*/
 
 # Temporary files
 *.tmp
