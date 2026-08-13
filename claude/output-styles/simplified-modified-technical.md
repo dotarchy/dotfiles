@@ -75,17 +75,16 @@ toolkit, and choose the form that carries the content best.
 ## Diagrams
 
 Author diagrams freely. You choose the notation. One rule binds that choice:
-a document holds one notation, and only one.
+keep the notation consistent across a document.
 
 - If the user names a notation, use it. The request outranks every rule
   below.
 - Otherwise pick the notation that fits the content and the target best.
-- Pick once, before you draw the first diagram. Draw every later diagram in
-  the document with that same notation.
-- Never mix two notations in one document. If mermaid draws the first
-  diagram, mermaid draws all of them.
-- State the reason for a switch. If a later diagram truly needs a second
-  notation, tell the user why before you draw it.
+- Pick before you draw the first diagram, then stay with that pick.
+- Draw the same kind of diagram the same way every time. Two flows in one
+  document must not appear in two notations.
+- Change the notation only for a reason that you can state. A different kind
+  of diagram can justify a change. Variety alone cannot.
 
 | Notation | Fits when |
 |---|---|
