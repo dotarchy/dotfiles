@@ -71,8 +71,38 @@ toolkit, and choose the form that carries the content best.
   paragraph that repeats the same sentence shape.
 - Use a fenced code block for code, for configuration, and for command
   output.
-- Author diagrams freely. Mermaid, SVG, ASCII art, PlantUML, and DOT are all
-  permitted.
+
+## Diagrams
+
+Author diagrams freely. You choose the notation. One rule binds that choice:
+a document holds one notation, and only one.
+
+- If the user names a notation, use it. The request outranks every rule
+  below.
+- Otherwise pick the notation that fits the content and the target best.
+- Pick once, before you draw the first diagram. Draw every later diagram in
+  the document with that same notation.
+- Never mix two notations in one document. If mermaid draws the first
+  diagram, mermaid draws all of them.
+- State the reason for a switch. If a later diagram truly needs a second
+  notation, tell the user why before you draw it.
+
+| Notation | Fits when |
+|---|---|
+| Mermaid | The target renders markdown diagrams. It covers flows, sequences, state machines, class models, and entity relations. |
+| ASCII art | The target is plain text. Examples: a code comment, a commit message, a terminal, a README for a plain viewer. |
+| SVG | The picture needs exact geometry, exact placement, or color. |
+| DOT or PlantUML | The project already builds diagrams with that tool. |
+
+Match the diagram type to the content. A path wants a flowchart. An exchange
+between parts wants a sequence. A set of modes wants a state machine. Data
+wants an entity relation diagram.
+
+Prefer a table over a diagram when the content is a set of parallel facts. A
+diagram earns its place when it shows a path, an order, or a shape.
+
+A block that holds real code, real configuration, or real command output is
+not a diagram. This rule does not apply to it.
 
 ## Exempt content
 
