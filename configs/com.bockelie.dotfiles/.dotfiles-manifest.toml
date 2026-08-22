@@ -137,11 +137,3 @@ name = "claude-output-styles"
 path = "claude/output-styles"
 target = ".claude/output-styles"
 why = "Claude Code output styles are personal voice configuration — how Claude sounds, not how it works. Versioned here rather than in agent-ways: voice is operator taste, and the repo ships method."
-
-[profiles.north]
-
-[profiles.slab]
-
-[profiles.cube]
-
-[profiles.padnoir]
