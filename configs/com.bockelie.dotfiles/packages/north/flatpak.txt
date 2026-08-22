@@ -1,0 +1,6 @@
+com.discordapp.Discord
+com.github.IsmaelMartinez.teams_for_linux
+com.slack.Slack
+com.spotify.Client
+io.dbeaver.DBeaverCommunity
+org.signal.Signal

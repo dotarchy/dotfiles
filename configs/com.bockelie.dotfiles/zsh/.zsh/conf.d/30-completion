@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+# Completion styles + compinit
+
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' rehash true
+zstyle ':completion:*' accept-exact '*(N)'
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$HOME/.cache/zsh"
+zstyle ':completion:*' completer _expand _complete _ignored _correct _approximate
+zstyle ':completion:*' menu select=1
+zstyle ':completion:*' list-prompt   %SAt %p: Hit TAB for more, or the character to insert%s
+zstyle ':completion:*' select-prompt %SScrolling active: current selection at %p%s
+
+autoload -Uz compinit
+# Rebuild dump at most once a day; use cached dump otherwise
+if [[ -n $HOME/.zcompdump(#qNmh+24) ]]; then
+  compinit
+else
+  compinit -C
+fi

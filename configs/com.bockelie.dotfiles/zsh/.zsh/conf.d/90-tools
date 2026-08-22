@@ -1,0 +1,9 @@
+#!/usr/bin/env zsh
+# External tool integrations
+
+command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
+
+# Ensure git uses color output (idempotent — only writes if unset)
+if command -v git &>/dev/null && ! git config --global --get color.ui &>/dev/null; then
+  git config --global color.ui auto
+fi

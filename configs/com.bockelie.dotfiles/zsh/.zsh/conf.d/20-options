@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+# General shell behavior
+
+setopt extendedglob
+setopt nocaseglob
+setopt rcexpandparam
+unsetopt beep
+# setopt correct   # enable to auto-suggest command typos
+
+# Treat these characters as word boundaries (affects ctrl-w, alt-b/f)
+WORDCHARS=${WORDCHARS//\/[&.;]}

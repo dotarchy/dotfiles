@@ -1,0 +1,668 @@
+#!/usr/bin/env bash
+#
+# github-backup — Mirror your entire GitHub profile to disk (and optionally a DVD).
+# Managed by `dotfiles`; deployed to ~/.local/bin/github-backup.
+#
+# For each selected repo it stores:
+#   - a complete `git clone --mirror` (every branch, tag, and ref — a true backup)
+#   - a <name>.meta.json with the GitHub-only data that does NOT live in git:
+#     description, topics, issues, pull requests, and releases.
+#
+# It writes a top-level MANIFEST.md and manifest.json recording WHEN the backup ran
+# and WHAT it contains, then can burn the whole tree to a blank DVD.
+#
+# Repo selection:
+#   - All repos you own are included.
+#   - Forks are included ONLY if pushed within --stale-days (default 90); older forks
+#     are skipped (they're recoverable from upstream).
+#
+# By default it only PREVIEWS what it would do — pass --run to actually back up.
+#
+# Usage:
+#   github-backup                       # preview the plan (does NOT back up)
+#   github-backup --run                 # backup YOUR profile (gh api user) to ~/github-backup/backups/<ts>
+#   github-backup --run --targz         # ...and pack the run into a .tar.gz
+#   github-backup --run --iso           # ...and build a .iso image (no burn)
+#   github-backup --run --burn          # ...and burn the result to /dev/sr0
+#   github-backup --run --user someone  # back up a different profile or org
+#   github-backup --run --stale-days 180  # keep forks pushed within 6 months
+#   github-backup --run --all-forks     # include every fork regardless of age
+#   github-backup --run --no-forks      # exclude all forks
+#   github-backup --run --no-metadata   # mirror git only, skip issues/PRs/releases
+#   github-backup --run --out /path/to/dir  # custom base directory
+#   github-backup --run --burn --dev /dev/sr1  # burn to a different optical device
+#
+# Requires: gh (authenticated), git, jq. For --iso/--burn: xorriso. For --targz: tar.
+
+set -euo pipefail
+
+# ---------- formatting (tput colors + icon map + print helpers) ----------
+# Colors are captured once, and only when stdout is a real terminal, so piped
+# output and the backup.log stay free of escape codes.
+if [[ -t 1 ]]; then
+  BOLD="$(tput bold)"; NC="$(tput sgr0)"
+  RED="$(tput setaf 1)"; GREEN="$(tput setaf 2)"; YELLOW="$(tput setaf 3)"
+  BLUE="$(tput setaf 4)"; MAGENTA="$(tput setaf 5)"; CYAN="$(tput setaf 6)"
+else
+  BOLD=""; NC=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; MAGENTA=""; CYAN=""
+fi
+
+# Git-themed Nerd Font glyphs, with an ASCII fallback for dumb terminals.
+# Built from codepoints via $'\uXXXX' so the bytes are generated at runtime
+# rather than pasted as literal glyphs (which don't survive every editor).
+declare -A ICONS
+if [[ -t 1 && "${TERM:-dumb}" != "dumb" ]]; then
+  ICONS=(
+    [info]=$''    [ok]=$''      [warn]=$''   [err]=$''
+    [github]=$''  [repo]=$''    [fork]=$''   [branch]=$''
+    [commit]=$''  [pr]=$''      [tag]=$''    [disk]=$''
+    [clock]=$''   [burn]=$'' [arrow]=$''
+  )
+else
+  ICONS=(
+    [info]='(i)' [ok]='[v]' [warn]='[!]' [err]='[x]' [github]='GH'
+    [repo]='[R]' [fork]='[Y]' [branch]='[b]' [commit]='[o]' [pr]='[<]'
+    [tag]='[#]'  [disk]='[D]' [clock]='[@]' [burn]='[B]' [arrow]='->'
+  )
+fi
+
+hr()      { printf '%s\n' "${BLUE}${BOLD}══════════════════════════════════════════════════════════════${NC}"; }
+header()  { printf '\n%s\n%s\n%s\n\n' "${BLUE}${BOLD}══════════════════════════════════════════════════════════════${NC}" "${CYAN}${BOLD} $1 ${NC}" "${BLUE}${BOLD}══════════════════════════════════════════════════════════════${NC}"; }
+status()  { printf '%s %s\n' "${CYAN}${ICONS[info]}${NC}" "$1"; }
+success() { printf '%s %s\n' "${GREEN}${ICONS[ok]}${NC}" "$1"; }
+warn()    { printf '%s %s\n' "${YELLOW}${ICONS[warn]}${NC}" "$1" >&2; }
+err()     { printf '%s %s\n' "${RED}${ICONS[err]}${NC}" "$1" >&2; }
+
+# Resolve the profile to back up: an explicit --user/GH_USER wins; otherwise the
+# authenticated personal login from `gh api user`. Cached so we ask gh once.
+_LOGIN_CACHE=""
+resolve_user() {
+  if [[ -n "$GH_USER" ]]; then printf '%s' "$GH_USER"; return 0; fi
+  if [[ -z "$_LOGIN_CACHE" ]]; then _LOGIN_CACHE="$(gh api user -q .login 2>/dev/null || true)"; fi
+  printf '%s' "$_LOGIN_CACHE"
+}
+
+# ---------- defaults (override via flags or env) ----------
+# GH_USER is intentionally empty by default: with no --user and no env override,
+# we resolve it to YOUR authenticated login (see resolve_user). `gh api user`
+# returns your personal account regardless of any enterprise orgs your token can
+# reach, so the zero-config default backs up your own profile — never an org's.
+GH_USER="${GH_USER:-}"
+FORK_STALE_DAYS="${FORK_STALE_DAYS:-90}"
+BASE_DIR="${BASE_DIR:-$HOME/github-backup}"
+INCLUDE_METADATA="${INCLUDE_METADATA:-1}"
+FORK_MODE="${FORK_MODE:-stale}"   # stale | all | none
+RUN="${RUN:-0}"
+VERIFY="${VERIFY:-1}"             # run `git fsck` on every mirror and report findings
+REPAIR="${REPAIR:-0}"            # try to heal fatally-corrupt mirrors (re-fetch, re-clone)
+
+# ---------- archive/output modes (independent; combine freely) ----------
+# The backup always lands as a plain directory tree under backups/<ts>.
+# These add extra packaged copies of that tree:
+MAKE_TARGZ="${MAKE_TARGZ:-0}"     # write backup_<ts>.tar.gz
+MAKE_ISO="${MAKE_ISO:-0}"         # write backup_<ts>.iso (no burn)
+BURN="${BURN:-0}"                 # build an iso and burn it to disc
+BURN_DEV="${BURN_DEV:-/dev/sr0}"  # optical device for --burn
+USB_DEST="${USB_DEST:-}"          # mountpoint of a removable USB drive to copy onto
+
+# ---------- help ----------
+usage() {
+  printf '%s %sgithub-backup%s — mirror your entire GitHub profile to disk (and optionally a DVD).\n' \
+    "${MAGENTA}${ICONS[github]}${NC}" "${BOLD}" "${NC}"
+  cat <<EOF
+
+For each selected repo it stores:
+  ${ICONS[branch]} a complete \`git clone --mirror\` (every branch, tag, and ref — a true backup)
+  ${ICONS[pr]} a <name>.meta.json with the GitHub-only data that does NOT live in git:
+     description, topics, issues, pull requests, and release notes.
+
+It writes a top-level MANIFEST.md and manifest.json recording WHEN the backup ran
+and WHAT it contains, then can optionally burn the whole tree to a blank DVD.
+
+Repo selection:
+  ${ICONS[repo]} all repos you own are included.
+  ${ICONS[fork]} forks are included ONLY if pushed within --stale-days (default 90); older
+     forks are skipped (they're recoverable from upstream).
+
+${BOLD}Usage:${NC}
+  ${CYAN}github-backup${NC} [options]              ${YELLOW}# preview the plan (does NOT back up)${NC}
+  ${CYAN}github-backup --run${NC} [options]        ${YELLOW}# actually perform the backup${NC}
+
+${BOLD}Options:${NC}
+  ${GREEN}--run, -y${NC}             Actually run the backup (without this, only prints the plan)
+  ${GREEN}--user${NC} <name>         GitHub profile or org to back up (default: your own login,
+                        resolved from \`gh api user\` — enterprise orgs are NOT
+                        included unless you name one here)
+  ${GREEN}--stale-days${NC} <n>      Keep forks pushed within this many days (default: 90)
+  ${GREEN}--all-forks${NC}           Include every fork regardless of age
+  ${GREEN}--no-forks${NC}            Exclude all forks
+  ${GREEN}--no-metadata${NC}         Mirror git only; skip issues/PRs/releases
+  ${GREEN}--no-verify${NC}           Skip the git fsck integrity report (on by default)
+  ${GREEN}--repair${NC}              Try to heal fatally-corrupt mirrors (re-fetch, then re-clone)
+  ${GREEN}--out${NC} <dir>           Base output directory                (default: ~/github-backup)
+  ${GREEN}-h, --help${NC}            Show this help and exit
+
+${BOLD}Archive/output${NC} (optional, combinable — the plain directory tree is always kept):
+  ${GREEN}--targz${NC}               Also pack the backup into backup_<ts>.tar.gz
+  ${GREEN}--iso${NC}                 Also build backup_<ts>.iso (image only, no burn)
+  ${GREEN}--burn${NC}                Also burn the backup to an optical disc
+  ${GREEN}--dev${NC} <device>        Optical device for --burn            (default: /dev/sr0)
+  ${GREEN}--usb${NC} <mountpoint>    Also copy the backup onto a mounted removable USB drive
+
+Every generated .tar.gz / .iso is signed with a ${BOLD}.sha256${NC} sidecar (verify with
+\`sha256sum -c backup_<ts>.tar.gz.sha256\`), the same pattern distros ship image checksums.
+
+Requires: gh (authenticated), git, jq. For --iso/--burn: xorriso. For --targz: tar.
+EOF
+}
+
+# ---------- arg parsing ----------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run|-y|--yes) RUN=1; shift ;;
+    --user)        GH_USER="$2"; shift 2 ;;
+    --stale-days)  FORK_STALE_DAYS="$2"; shift 2 ;;
+    --out)         BASE_DIR="$2"; shift 2 ;;
+    --no-metadata) INCLUDE_METADATA=0; shift ;;
+    --all-forks)   FORK_MODE="all"; shift ;;
+    --no-forks)    FORK_MODE="none"; shift ;;
+    --verify)      VERIFY=1; shift ;;
+    --no-verify)   VERIFY=0; shift ;;
+    --repair)      REPAIR=1; shift ;;
+    --targz|--tar-gz|--tar) MAKE_TARGZ=1; shift ;;
+    --iso)         MAKE_ISO=1; shift ;;
+    --burn)        BURN=1; shift ;;
+    --dev)         BURN_DEV="$2"; shift 2 ;;
+    --usb)         USB_DEST="$2"; shift 2 ;;
+    -h|--help)     usage; exit 0 ;;
+    *) err "unknown flag: $1"; warn "run 'github-backup --help' for options"; exit 2 ;;
+  esac
+done
+
+# ---------- plan preview (default: does NOT back up) ----------
+# Describe exactly what a run would do with the current flags. This is the
+# default so an accidental `github-backup` never starts cloning your profile.
+show_plan() {
+  local cutoff fork_desc who who_label
+  cutoff="$(date -d "$FORK_STALE_DAYS days ago" +%Y-%m-%d)"
+  case "$FORK_MODE" in
+    all)   fork_desc="include ${BOLD}every${NC} fork regardless of age" ;;
+    none)  fork_desc="${BOLD}exclude${NC} all forks" ;;
+    *)     fork_desc="include forks pushed since ${BOLD}${cutoff}${NC} (${FORK_STALE_DAYS}d window)" ;;
+  esac
+
+  # Resolve which profile we'd target, and note where the choice came from.
+  who="$(resolve_user)"
+  if [[ -n "$GH_USER" ]]; then who_label="(from --user)"
+  elif [[ -n "$who" ]];    then who_label="(your authenticated login)"
+  else who="<your GitHub login>"; who_label="(run 'gh auth login' first)"; fi
+
+  header "${ICONS[github]} github-backup — plan"
+  status  "This would mirror ${BOLD}${who}${NC}'s GitHub profile to disk. Nothing has run yet."
+  echo
+  printf '  %s  %-14s %s %s\n' "${ICONS[github]}" "account"    "${who}" "${YELLOW}${who_label}${NC}"
+  printf '  %s  %-14s %s\n' "${ICONS[disk]}"   "destination" "${BASE_DIR}/backups/<timestamp>"
+  printf '  %s  %-14s %s\n' "${ICONS[fork]}"   "forks"       "${fork_desc}"
+  printf '  %s  %-14s %s\n' "${ICONS[pr]}"     "metadata"    "$([[ $INCLUDE_METADATA == 1 ]] && echo 'issues, PRs, release notes' || echo 'git mirror only (skipped)')"
+  printf '  %s  %-14s %s\n' "${ICONS[commit]}" "integrity"   "$([[ $VERIFY == 1 ]] && echo "git fsck report on every mirror (never blocks)$([[ $REPAIR == 1 ]] && echo '; repair fatal repos')" || echo 'skipped (--no-verify)')"
+
+  local -a arch=()
+  [[ $MAKE_TARGZ == 1 ]] && arch+=("tar.gz")
+  [[ $MAKE_ISO   == 1 ]] && arch+=("iso")
+  [[ $BURN       == 1 ]] && arch+=("burn → ${BURN_DEV}")
+  [[ -n $USB_DEST ]]     && arch+=("usb → ${USB_DEST}")
+  local arch_desc="directory tree only"
+  if [[ ${#arch[@]} -gt 0 ]]; then
+    local joined; printf -v joined '%s, ' "${arch[@]}"; joined="${joined%, }"
+    arch_desc="directory tree + ${joined}"
+  fi
+  printf '  %s  %-14s %s\n' "${ICONS[burn]}"   "archive"     "${arch_desc}"
+  [[ $MAKE_TARGZ == 1 || $MAKE_ISO == 1 ]] && \
+    printf '  %s  %-14s %s\n' "${ICONS[ok]}"   "checksums"   "each .tar.gz/.iso gets a .sha256 sidecar"
+  echo
+  status "For each repo: ${ICONS[branch]} full \`git clone --mirror\` (all branches/tags/refs)$([[ $INCLUDE_METADATA == 1 ]] && printf ' %s meta.json' "${ICONS[commit]}")."
+  status "Then writes MANIFEST.md + manifest.json and updates the ${BOLD}latest${NC} pointer."
+  echo
+  success "Ready. To actually perform this backup, re-run with ${BOLD}${GREEN}--run${NC}:"
+  printf '    %s%s github-backup --run%s\n\n' "${CYAN}" "${ICONS[arrow]}" "${NC}"
+}
+
+if [[ "$RUN" != 1 ]]; then
+  show_plan
+  exit 0
+fi
+
+# ---------- preflight ----------
+for t in gh git jq; do command -v "$t" >/dev/null || { err "missing tool: $t"; exit 1; }; done
+gh auth status >/dev/null 2>&1 || { err "gh not authenticated — run: gh auth login"; exit 1; }
+# Lock in the target profile: explicit --user/GH_USER, else the authenticated login.
+GH_USER="$(resolve_user)"
+[[ -n "$GH_USER" ]] || { err "could not resolve a GitHub login (gh api user failed) — pass --user <name>"; exit 1; }
+[[ "$BURN" == 1 || "$MAKE_ISO" == 1 ]] && { command -v xorriso >/dev/null || { err "missing xorriso (needed for --iso/--burn)"; exit 1; }; }
+[[ "$MAKE_TARGZ" == 1 ]] && { command -v tar >/dev/null || { err "missing tar (needed for --targz)"; exit 1; }; }
+# One tool computes the sha256 sidecars; prefer sha256sum, fall back to shasum.
+SHA_CMD=""; command -v sha256sum >/dev/null && SHA_CMD="sha256sum" || { command -v shasum >/dev/null && SHA_CMD="shasum -a 256"; }
+[[ ( "$MAKE_TARGZ" == 1 || "$MAKE_ISO" == 1 ) && -z "$SHA_CMD" ]] && { err "missing sha256sum/shasum (needed to sign archives)"; exit 1; }
+if [[ -n "$USB_DEST" ]]; then
+  [[ -d "$USB_DEST" && -w "$USB_DEST" ]] || { err "--usb target not a writable directory: $USB_DEST (mount the drive first)"; exit 1; }
+fi
+
+TS="$(date +%Y-%m-%d_%H%M%S)"
+RUN_DIR="$BASE_DIR/backups/$TS"
+REPOS_DIR="$RUN_DIR/repos"
+CUTOFF="$(date -d "$FORK_STALE_DAYS days ago" +%Y-%m-%d)"
+mkdir -p "$REPOS_DIR"
+LOG="$RUN_DIR/backup.log"
+exec > >(tee -a "$LOG") 2>&1
+
+header "${ICONS[github]} GitHub profile backup"
+printf '  %s  %-12s %s\n' "${ICONS[github]}" "user"        "${GH_USER}"
+printf '  %s  %-12s %s\n' "${ICONS[clock]}"  "started"     "$(date -Iseconds)"
+printf '  %s  %-12s %s\n' "${ICONS[disk]}"   "destination" "${RUN_DIR}"
+printf '  %s  %-12s %s\n' "${ICONS[fork]}"   "fork mode"   "${FORK_MODE} (cutoff ${CUTOFF}, ${FORK_STALE_DAYS}d)"
+printf '  %s  %-12s %s\n' "${ICONS[pr]}"     "metadata"    "$([[ $INCLUDE_METADATA == 1 ]] && echo yes || echo no)"
+hr
+
+# ---------- enumerate + select repos ----------
+status "Listing repositories for ${BOLD}${GH_USER}${NC} ..."
+ALL_JSON="$RUN_DIR/_all_repos.json"
+gh repo list "$GH_USER" --limit 1000 \
+  --json name,nameWithOwner,isFork,isArchived,isPrivate,diskUsage,pushedAt,description,defaultBranchRef,url \
+  > "$ALL_JSON"
+
+SEL_JSON="$RUN_DIR/_selected_repos.json"
+jq --arg c "$CUTOFF" --arg mode "$FORK_MODE" '
+  [ .[] | select(
+      (.isFork | not)
+      or ($mode == "all")
+      or ($mode == "stale" and (.pushedAt[0:10] >= $c))
+    )
+  ] | sort_by(.name)
+' "$ALL_JSON" > "$SEL_JSON"
+
+TOTAL=$(jq length "$ALL_JSON")
+COUNT=$(jq length "$SEL_JSON")
+status "Selected ${BOLD}${COUNT}${NC} of ${TOTAL} repos."
+
+# ---------- mirror helper ----------
+# Clone/update over HTTPS (authenticated by gh's credential helper), NOT ssh.
+# ssh to github can hang indefinitely on flaky networks; HTTPS + `timeout` + retries
+# guarantees no single repo can stall the whole run.
+CLONE_TIMEOUT="${CLONE_TIMEOUT:-180}"
+CLONE_RETRIES="${CLONE_RETRIES:-3}"
+GIT_CRED=(-c credential.https://github.com.helper= -c credential.https://github.com.helper='!gh auth git-credential')
+
+mirror_repo() {  # $1=nwo  $2=dest  -> 0 on success
+  local nwo="$1" dest="$2" attempt
+  for attempt in $(seq 1 "$CLONE_RETRIES"); do
+    if [[ -d "$dest" ]]; then
+      timeout "$CLONE_TIMEOUT" git "${GIT_CRED[@]}" --git-dir="$dest" \
+        remote update --prune >/dev/null 2>&1 && return 0
+    else
+      timeout "$CLONE_TIMEOUT" git "${GIT_CRED[@]}" clone --mirror --quiet \
+        "https://github.com/$nwo.git" "$dest" >/dev/null 2>&1 && return 0
+      rm -rf "$dest"   # discard partial mirror before retrying
+    fi
+    [[ $attempt -lt $CLONE_RETRIES ]] && { echo "    … retry $((attempt+1))/$CLONE_RETRIES"; sleep $((attempt*3)); }
+  done
+  return 1
+}
+
+# classify_repo: how sound is a mirror's object store?
+#   0 = clean            (full fsck passes)
+#   1 = warnings only    (full fsck complains, but every object is present, readable,
+#                         and linked — historical format warts like badEmail /
+#                         zeroPaddedFilemode that GitHub itself hosts as-is)
+#   2 = FATAL            (real data loss: objects missing / links broken / a present
+#                         object's content is corrupt so it won't inflate or re-hash)
+# Two signals are needed. --connectivity-only catches missing objects, broken links,
+# and bad ref pointers — but it does NOT read object contents, so a present-but-
+# corrupt object passes it. We therefore also scan full fsck's output for the
+# content-corruption signatures (inflate/unpack/hash-mismatch) that only appear
+# when an existing object's bytes are damaged.
+classify_repo() {  # $1=dest
+  local dest="$1" out
+  out="$(git --git-dir="$dest" fsck --full --no-dangling --no-progress 2>&1)" && return 0
+  git --git-dir="$dest" fsck --connectivity-only --no-dangling --no-progress >/dev/null 2>&1 || return 2
+  printf '%s\n' "$out" | grep -qiE 'unable to unpack|object corrupt|corrupt or missing|inflate|sha1 mismatch|hash mismatch|bad object|did not receive' && return 2
+  return 1
+}
+
+# repair_repo: try to heal a fatally-corrupt mirror. First re-fetch (cheap; fixes
+# an interrupted/partial update), then, failing that, throw the local copy away
+# and re-clone fresh from GitHub. Returns 0 only if connectivity is restored.
+# If the object is missing upstream too, nothing local can fix it — we give up
+# and the caller keeps whatever objects we DID get (salvage).
+repair_repo() {  # $1=name  $2=dest
+  local name="$1" dest="$2" nwo
+  nwo="$(jq -r --arg n "$name" '.[] | select(.name==$n) | .nameWithOwner' "$SEL_JSON" 2>/dev/null)"
+  [[ -n "$nwo" ]] || nwo="$GH_USER/$name"
+  local rc
+  status "    ${ICONS[arrow]} re-fetching $name ..."
+  timeout "$CLONE_TIMEOUT" git "${GIT_CRED[@]}" --git-dir="$dest" remote update --prune >/dev/null 2>&1 || true
+  rc=0; classify_repo "$dest" || rc=$?; [[ $rc -lt 2 ]] && return 0
+  status "    re-cloning $name from scratch ..."
+  rm -rf "$dest"
+  mirror_repo "$nwo" "$dest" || return 1
+  rc=0; classify_repo "$dest" || rc=$?; [[ $rc -lt 2 ]] && return 0
+  return 1
+}
+
+# ---------- backup loop ----------
+i=0; ok=0; fail=0
+declare -a FAILED=()
+while IFS=$'\t' read -r name nwo isFork isPrivate; do
+  i=$((i+1))
+  printf '%s%s%s %s%s%s\n' \
+    "${CYAN}" "$(printf '[%3d/%3d]' "$i" "$COUNT")" "${NC}" \
+    "$([[ $isFork == true ]] && printf '%s ' "${ICONS[fork]}" || printf '%s ' "${ICONS[repo]}")$nwo" \
+    "$([[ $isFork == true ]] && printf '%s (fork)%s' "${YELLOW}" "${NC}")" \
+    "$([[ $isPrivate == true ]] && printf '%s (private)%s' "${MAGENTA}" "${NC}")"
+
+  dest="$REPOS_DIR/$name.git"
+  if mirror_repo "$nwo" "$dest"; then
+    ok=$((ok+1))
+  else
+    err "    mirror failed after $CLONE_RETRIES attempts"; fail=$((fail+1)); FAILED+=("$nwo"); continue
+  fi
+
+  # ---- GitHub-only metadata (issues / PRs / releases / repo facts) ----
+  if [[ "$INCLUDE_METADATA" == 1 ]]; then
+    meta="$REPOS_DIR/$name.meta.json"
+    # Stream metadata through FILES, not argv. Issue/PR bodies can be large; passing
+    # them via `jq --argjson` overflows ARG_MAX on big repos. --slurpfile has no limit.
+    tmp="$REPOS_DIR/.$name.meta.d"; mkdir -p "$tmp"
+    jq --arg n "$name" '[.[] | select(.name == $n)][0]' "$ALL_JSON" > "$tmp/repo.json"
+    timeout 120 gh issue list -R "$nwo" --state all --limit 1000 \
+      --json number,title,state,createdAt,closedAt,author,labels,body > "$tmp/issues.json" 2>/dev/null \
+      || echo '[]' > "$tmp/issues.json"
+    timeout 120 gh pr list -R "$nwo" --state all --limit 1000 \
+      --json number,title,state,createdAt,closedAt,mergedAt,author,labels,body > "$tmp/prs.json" 2>/dev/null \
+      || echo '[]' > "$tmp/prs.json"
+    # Release NOTES only — never the binary assets (those can be huge). We keep a
+    # lightweight record of each release plus asset names/sizes for inventory.
+    timeout 120 gh api "repos/$nwo/releases" --paginate 2>/dev/null \
+      | jq -s 'add // []
+          | map({tag_name, name, published_at, draft, prerelease, body,
+                 assets: (.assets // [] | map({name, size, content_type}))})' \
+        > "$tmp/releases.json" 2>/dev/null || echo '[]' > "$tmp/releases.json"
+    # Guarantee every file holds valid JSON before the merge.
+    for f in repo issues prs releases; do
+      jq -e . "$tmp/$f.json" >/dev/null 2>&1 || echo '[]' > "$tmp/$f.json"
+    done
+    jq -n \
+      --slurpfile repo     "$tmp/repo.json" \
+      --slurpfile issues   "$tmp/issues.json" \
+      --slurpfile prs      "$tmp/prs.json" \
+      --slurpfile releases "$tmp/releases.json" \
+      '{repo:($repo[0] // null),
+        issues:($issues[0] // []),
+        pull_requests:($prs[0] // []),
+        releases:($releases[0] // []),
+        counts:{issues:(($issues[0]//[])|length),
+                pull_requests:(($prs[0]//[])|length),
+                releases:(($releases[0]//[])|length)}}' \
+      > "$meta"
+    rm -rf "$tmp"
+  fi
+done < <(jq -r '.[] | [.name, .nameWithOwner, (.isFork|tostring), (.isPrivate|tostring)] | @tsv' "$SEL_JSON")
+
+# ---------- integrity verification (git fsck) ----------
+# Re-hash every object and check DAG connectivity in each mirror BEFORE we pack
+# it into durable/WORM media. This is git-native content verification, distinct
+# from the .sha256 sidecars (which prove the *packed copy* transferred intact).
+#
+# We separate two very different outcomes: cosmetic warnings (old commits with
+# odd author lines etc. — the repo is fully recoverable and GitHub hosts it as-is)
+# vs FATAL corruption (objects missing/broken — real data loss). We NEVER omit or
+# block on either: a partial backup beats no backup. Verification is a report, not
+# a gate — findings are printed and recorded in the manifest. With --repair we
+# additionally try to heal fatal repos (re-fetch, then fresh re-clone) to capture
+# more, but we still package whatever we have regardless of the result.
+fsck_ok=0; fsck_warn=0; fsck_fail=0
+declare -a FSCK_WARN=() FSCK_FAILED=() FSCK_REPAIRED=()
+if [[ "$VERIFY" == 1 ]]; then
+  header "${ICONS[ok]} verifying repository integrity (git fsck)"
+  for dest in "$REPOS_DIR"/*.git; do
+    [[ -d "$dest" ]] || continue
+    rname="$(basename "${dest%.git}")"
+    rc=0; classify_repo "$dest" || rc=$?   # `|| rc=$?` so set -e doesn't exit on rc 1/2
+    case "$rc" in
+      0) fsck_ok=$((fsck_ok+1)) ;;
+      1) fsck_ok=$((fsck_ok+1)); fsck_warn=$((fsck_warn+1)); FSCK_WARN+=("$rname") ;;
+      2)
+        err "    ${rname}: FATAL — objects missing, broken, or corrupt"
+        if [[ "$REPAIR" == 1 ]] && repair_repo "$rname" "$dest"; then
+          success "    ${rname}: repaired"
+          fsck_ok=$((fsck_ok+1)); FSCK_REPAIRED+=("$rname")
+        else
+          fsck_fail=$((fsck_fail+1)); FSCK_FAILED+=("$rname")
+        fi
+        ;;
+    esac
+  done
+  # Report — we package everything regardless; this is just what we found.
+  if [[ $fsck_fail -eq 0 ]]; then
+    success "all ${fsck_ok} mirror(s) intact$([[ $fsck_warn -gt 0 ]] && echo " (${fsck_warn} with cosmetic warnings)")$([[ ${#FSCK_REPAIRED[@]} -gt 0 ]] && echo ", ${#FSCK_REPAIRED[@]} repaired")"
+  else
+    warn "${fsck_fail} mirror(s) still corrupt after $([[ $REPAIR == 1 ]] && echo 'repair' || echo 'check'): ${FSCK_FAILED[*]}"
+    warn "keeping and packaging them anyway — whatever objects we DID capture are worth more than nothing."
+    warn "these are recorded as 'degraded' in the manifest so you know what to re-pull later."
+    [[ $REPAIR != 1 ]] && status "tip: --repair re-fetches/re-clones fatal repos to try to capture more."
+  fi
+  [[ $fsck_warn -gt 0 ]] && status "cosmetic warnings (fully recoverable): ${FSCK_WARN[*]}"
+else
+  status "integrity check skipped (--no-verify)"
+fi
+
+# JSON arrays for the manifest.
+json_array() {  # args -> JSON array of strings
+  if [[ $# -eq 0 ]]; then printf '[]'; else printf '%s\n' "$@" | jq -R . | jq -s .; fi
+}
+FSCK_FAILED_JSON="$(json_array "${FSCK_FAILED[@]+"${FSCK_FAILED[@]}"}")"
+FSCK_WARN_JSON="$(json_array "${FSCK_WARN[@]+"${FSCK_WARN[@]}"}")"
+FSCK_REPAIRED_JSON="$(json_array "${FSCK_REPAIRED[@]+"${FSCK_REPAIRED[@]}"}")"
+
+# ---------- manifest ----------
+status "Writing manifest ..."
+BYTES=$(du -sb "$REPOS_DIR" | cut -f1)
+HUMAN=$(du -sh "$REPOS_DIR" | cut -f1)
+
+# machine-readable manifest
+jq -n \
+  --arg user "$GH_USER" --arg ts "$(date -Iseconds)" --arg host "$(hostname)" \
+  --arg cutoff "$CUTOFF" --arg forkmode "$FORK_MODE" \
+  --argjson total "$TOTAL" --argjson selected "$COUNT" \
+  --argjson ok "$ok" --argjson fail "$fail" --argjson bytes "$BYTES" \
+  --arg verify "$VERIFY" \
+  --argjson vok "$fsck_ok" --argjson vwarn "$fsck_warn" --argjson vfail "$fsck_fail" \
+  --argjson vfailed "$FSCK_FAILED_JSON" --argjson vwarned "$FSCK_WARN_JSON" --argjson vrepaired "$FSCK_REPAIRED_JSON" \
+  --slurpfile repos "$SEL_JSON" \
+  '{generated_by:"github-backup", user:$user, created:$ts, host:$host,
+    fork_policy:{mode:$forkmode, stale_cutoff:$cutoff},
+    totals:{repos_total:$total, repos_backed_up:$selected, succeeded:$ok, failed:$fail, bytes_on_disk:$bytes},
+    integrity:{checked:($verify=="1"), method:"git fsck --full, classified via connectivity + content signatures",
+               policy:"report-only — degraded repos are packaged, never omitted",
+               intact:$vok, cosmetic_warnings:$vwarn, degraded:$vfail,
+               warned_repos:$vwarned, repaired_repos:$vrepaired, degraded_repos:$vfailed},
+    repos:$repos[0]}' > "$RUN_DIR/manifest.json"
+
+# human-readable MANIFEST.md
+{
+  echo "# GitHub Backup — $GH_USER"
+  echo
+  echo "**Created:** $(date -Iseconds)  "
+  echo "**Host:** $(hostname)  "
+  echo "**Tool:** \`github-backup\`  "
+  echo "**Contents:** complete \`git --mirror\` of each repo (all branches/tags/refs)$([[ $INCLUDE_METADATA == 1 ]] && echo ' + issues/PRs/release-notes metadata (no binary release assets)')."
+  echo
+  echo "## Summary"
+  echo
+  echo "| Metric | Value |"
+  echo "|---|---|"
+  echo "| Repos backed up | $COUNT of $TOTAL |"
+  echo "| Succeeded / failed | $ok / $fail |"
+  echo "| Integrity (git fsck) | $([[ $VERIFY == 1 ]] && echo "$fsck_ok intact ($fsck_warn cosmetic), $fsck_fail degraded" || echo 'not checked') |"
+  echo "| Fork policy | $FORK_MODE (forks kept if pushed since $CUTOFF) |"
+  echo "| Size on disk | $HUMAN |"
+  if [[ $VERIFY == 1 && $fsck_fail -gt 0 ]]; then
+    echo
+    echo "> ⚠️ **Degraded repos** (packaged anyway — objects missing/broken, re-pull when possible): ${FSCK_FAILED[*]}"
+  fi
+  echo
+  echo "## How to restore a repo"
+  echo
+  echo '```bash'
+  echo '# Push the mirror to a fresh empty GitHub repo:'
+  echo 'gh repo create <new-name> --private'
+  echo 'git -C repos/<name>.git push --mirror git@github.com:<you>/<new-name>.git'
+  echo '#'
+  echo '# Or just work from it locally:'
+  echo 'git clone repos/<name>.git <name> && cd <name>'
+  echo '```'
+  echo
+  echo "## Repositories"
+  echo
+  echo "| Repo | Visibility | Fork | Last push | Description |"
+  echo "|---|---|---|---|---|"
+  jq -r '.[] | "| \(.name) | \(if .isPrivate then "private" else "public" end) | \(if .isFork then "yes" else "no" end) | \(.pushedAt[0:10]) | \((.description // "") | gsub("[|\n]"; " ")) |"' "$SEL_JSON"
+} > "$RUN_DIR/MANIFEST.md"
+
+# refresh "latest" pointer
+ln -sfn "$RUN_DIR" "$BASE_DIR/latest"
+
+header "${ICONS[ok]} backup complete"
+if [[ $fail -eq 0 ]]; then
+  success "${BOLD}${ok}${NC} ok, ${fail} failed  ${ICONS[disk]} ${HUMAN}"
+else
+  warn "${ok} ok, ${BOLD}${fail} failed${NC}  ${ICONS[disk]} ${HUMAN}"
+fi
+status "Manifest: ${RUN_DIR}/MANIFEST.md"
+# One arg per format cycle: the icon lives in the format string, not in the args,
+# so every failed repo gets its own marked line (printf recycles the format).
+[[ $fail -gt 0 ]] && { warn "Could not mirror:"; printf "   ${RED}${ICONS[err]}${NC} %s\n" "${FAILED[@]}"; }
+if [[ "$VERIFY" == 1 ]]; then
+  if [[ $fsck_fail -gt 0 ]]; then
+    warn "Integrity: ${fsck_ok} intact, ${BOLD}${fsck_fail} degraded${NC} (packaged anyway): ${FSCK_FAILED[*]}"
+  else
+    success "Integrity: all ${fsck_ok} mirror(s) intact$([[ $fsck_warn -gt 0 ]] && echo ", ${fsck_warn} with cosmetic warnings")"
+  fi
+fi
+hr
+
+# ---------- packaging / output targets ----------
+# Every extra copy is a distinct artifact. Compact ones (.tar.gz, .iso) are each
+# signed with a `.sha256` sidecar so the copy can be verified anywhere —
+# `sha256sum -c backup_<ts>.tar.gz.sha256` — the same pattern distros ship.
+PKG_DIR="$(dirname "$RUN_DIR")"          # $BASE_DIR/backups — archives sit beside <ts>/
+declare -a ARTIFACTS=()                  # compact files produced (for --usb copy + summary)
+
+sha_sidecar() {  # $1=file -> writes <file>.sha256 (sha256sum -c compatible: hash + basename)
+  local f="$1" dir base
+  dir="$(dirname "$f")"; base="$(basename "$f")"
+  ( cd "$dir" && $SHA_CMD "$base" > "$base.sha256" )
+  success "signed → ${base}.sha256"
+}
+
+if [[ "$MAKE_TARGZ" == 1 ]]; then
+  header "${ICONS[disk]} tar.gz archive"
+  tgz="$PKG_DIR/backup_$TS.tar.gz"
+  status "Packing ${BOLD}${TS}/${NC} → $(basename "$tgz") ..."
+  tar czf "$tgz" -C "$PKG_DIR" "$TS"
+  sha_sidecar "$tgz"
+  ARTIFACTS+=("$tgz" "$tgz.sha256")
+  success "tar.gz → ${tgz} ($(du -sh "$tgz" | cut -f1))"
+fi
+
+# --iso and --burn both need an ISO image; build it once.
+ISO=""
+if [[ "$MAKE_ISO" == 1 || "$BURN" == 1 ]]; then
+  header "${ICONS[burn]} iso image"
+  ISO="$PKG_DIR/backup_$TS.iso"
+  label="GH_${GH_USER}_${TS}"; label="${label:0:32}"
+  status "Building iso (volume id: ${BOLD}${label}${NC}) ..."
+  xorriso -as mkisofs -V "$label" -o "$ISO" "$RUN_DIR" >/dev/null 2>&1
+  sha_sidecar "$ISO"
+  success "iso → ${ISO} ($(du -sh "$ISO" | cut -f1))"
+fi
+
+if [[ "$BURN" == 1 ]]; then
+  header "${ICONS[burn]} burn to disc"
+  status "Preparing to burn to ${BOLD}${BURN_DEV}${NC} ..."
+  media=$(xorriso -outdev "$BURN_DEV" -toc 2>&1 | grep -m1 'Media status' || true)
+  status "    $media"
+  if echo "$media" | grep -q 'is blank'; then
+    cap_mb=$((BYTES/1024/1024))
+    status "    payload ~${cap_mb} MB"
+    if [[ $cap_mb -gt 4400 ]]; then
+      err "    payload exceeds single-layer DVD capacity (~4400 MB). Skipping burn."
+    else
+      status "Burning $(basename "$ISO") ..."
+      xorriso -as cdrecord -v dev="$BURN_DEV" -dao "$ISO"
+      success "Burn complete. Verifying ..."
+      mp="$(mktemp -d)"
+      if sudo mount -o ro "$BURN_DEV" "$mp" 2>/dev/null; then
+        status "    disc mounts OK; top-level:"; ls "$mp"/*/ 2>/dev/null | head
+        sudo umount "$mp"
+      fi
+      rmdir "$mp" 2>/dev/null || true
+    fi
+  else
+    err "    media is not blank — load a blank disc to burn. Skipping."
+  fi
+  # The ISO was only a means to burn; keep it on disk only if --iso was also asked.
+  if [[ "$MAKE_ISO" == 1 ]]; then
+    ARTIFACTS+=("$ISO" "$ISO.sha256")
+  else
+    rm -f "$ISO" "$ISO.sha256"
+  fi
+elif [[ -n "$ISO" ]]; then
+  ARTIFACTS+=("$ISO" "$ISO.sha256")
+fi
+
+# ---------- optional copy to a removable USB drive ----------
+if [[ -n "$USB_DEST" ]]; then
+  header "${ICONS[disk]} copy to USB"
+  usb_dir="$USB_DEST/github-backup"
+  mkdir -p "$usb_dir"
+  status "Copying to ${BOLD}${usb_dir}${NC} ..."
+  # Prefer any compact artifacts (small, verifiable); otherwise copy the full tree.
+  if [[ ${#ARTIFACTS[@]} -gt 0 ]]; then
+    for a in "${ARTIFACTS[@]}"; do
+      [[ -e "$a" ]] || continue
+      if command -v rsync >/dev/null; then rsync -a "$a" "$usb_dir/"; else cp -a "$a" "$usb_dir/"; fi
+      status "    ${ICONS[arrow]} $(basename "$a")"
+    done
+  else
+    if command -v rsync >/dev/null; then rsync -a "$RUN_DIR" "$usb_dir/"; else cp -a "$RUN_DIR" "$usb_dir/"; fi
+    status "    ${ICONS[arrow]} ${TS}/ (directory tree)"
+  fi
+  sync   # flush buffers so it's safe to physically remove the drive
+  # Verify any checksummed artifacts landed intact on the drive.
+  verified=0
+  if [[ ${#ARTIFACTS[@]} -gt 0 ]]; then
+    for a in "${ARTIFACTS[@]}"; do
+      case "$a" in *.sha256)
+        ( cd "$usb_dir" && $SHA_CMD -c "$(basename "$a")" >/dev/null 2>&1 ) && verified=$((verified+1)) || err "    checksum FAILED on USB: $(basename "$a")"
+      ;; esac
+    done
+  fi
+  [[ $verified -gt 0 ]] && success "verified ${verified} checksum(s) on USB"
+  success "USB copy complete — safe to unmount ${USB_DEST}"
+fi
+
+# ---------- artifact summary ----------
+if [[ ${#ARTIFACTS[@]} -gt 0 ]]; then
+  hr
+  status "Artifacts:"
+  # `|| continue` rather than `&& printf`: a missing artifact must skip a line,
+  # not become the loop's (failing) exit status.
+  for a in "${ARTIFACTS[@]}"; do
+    [[ -e "$a" ]] || continue
+    printf '   %s %s\n' "${GREEN}${ICONS[ok]}${NC}" "$a"
+  done
+fi
+
+# The run's outcome was already reported above (and set -e aborts on real errors),
+# so end on an explicit success rather than letting the last cosmetic test decide.
+exit 0

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# mlterm-fb launcher.
+#
+# mlterm's framebuffer build auto-detects ONE keyboard via /sys names and, on a
+# multi-input machine, grabs the wrong evdev node (e.g. the Power Button) — so
+# typing does nothing. Hardcoding KBD_INPUT_NUM is fragile because USB renumbers
+# event* across reboots/replugs.
+#
+# Instead, resolve the keyboard device number(s) by capability at launch: any
+# input device whose Name matches $MLTERM_KBD_MATCH AND exposes a 'kbd' handler
+# (excludes mouse interfaces, power/consumer-control buttons). The mouse comes
+# from the kernel's merged /dev/input/mice automatically, so only the keyboard
+# needs this. mlterm accepts at most two keyboard device numbers.
+#
+# Override the target with: MLTERM_KBD_MATCH='regex' mlterm-fb
+set -euo pipefail
+
+match="${MLTERM_KBD_MATCH:-8BitDo}"
+
+nums=$(awk -v re="$match" '
+  /^N: Name=/ { name=$0; sub(/^N: Name="/,"",name); sub(/"$/,"",name) }
+  /^H: Handlers=/ {
+    if (name ~ re && $0 ~ /(^| )kbd( |$)/ && match($0, /event[0-9]+/))
+      print substr($0, RSTART+5, RLENGTH-5)
+  }
+' /proc/bus/input/devices | head -2 | paste -sd,)
+
+if [ -n "$nums" ]; then
+  echo "mlterm-fb: keyboards /$match/ -> KBD_INPUT_NUM=$nums" >&2
+  exec env KBD_INPUT_NUM="$nums" /usr/bin/mlterm-fb "$@"
+else
+  echo "mlterm-fb: no keyboard matched /$match/; using mlterm auto-detect" >&2
+  exec /usr/bin/mlterm-fb "$@"
+fi

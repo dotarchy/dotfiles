@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# padnoir — personal laptop
+DOTFILES_HOST=padnoir
+
+# Auto-update knob (days). Comment out to disable.
+# DOTFILES_AUTO_UPDATE_DAYS=14

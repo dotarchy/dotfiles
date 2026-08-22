@@ -1,0 +1,27 @@
+#!/usr/bin/env zsh
+# Auto-update dotfiles repo if DOTFILES_AUTO_UPDATE_DAYS is set (in host.d/).
+# Runs in background; throttled by a stamp file. Output captured in a log.
+# Unset = disabled (default).
+
+if [[ -n "${DOTFILES_AUTO_UPDATE_DAYS:-}" ]] && command -v dotfiles &>/dev/null; then
+  _stamp="$HOME/.cache/dotfiles/last-update"
+  mkdir -p "${_stamp:h}"
+
+  _now=$(date +%s)
+  _last=0
+  [[ -f "$_stamp" ]] && _last=$(date -r "$_stamp" +%s 2>/dev/null || echo 0)
+  _age_days=$(( (_now - _last) / 86400 ))
+
+  if (( _age_days >= DOTFILES_AUTO_UPDATE_DAYS )); then
+    _log="$HOME/.cache/dotfiles/auto-update.log"
+    (
+      {
+        echo "=== $(date) — auto-update ==="
+        dotfiles pull
+        dotfiles deploy
+      } > "$_log" 2>&1
+      touch "$_stamp"
+    ) &!
+  fi
+  unset _stamp _now _last _age_days _log
+fi

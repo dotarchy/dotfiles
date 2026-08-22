@@ -1,0 +1,4 @@
+com.github.IsmaelMartinez.teams_for_linux
+com.slack.Slack
+net.supercellwx.app
+us.zoom.Zoom

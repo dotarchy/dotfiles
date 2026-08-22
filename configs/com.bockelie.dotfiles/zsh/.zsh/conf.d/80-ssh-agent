@@ -1,0 +1,42 @@
+#!/usr/bin/env zsh
+# SSH agent.
+#
+# Preferred: the systemd user socket (`ssh-agent.socket`, shipped by openssh).
+# One socket-activated agent per *login session* at a well-known path, so it
+# does not die with the terminal window that happened to start it, and repeated
+# shells never spawn duplicate agents.
+#
+# Keys are loaded lazily on first use via `AddKeysToAgent yes` in ~/.ssh/config
+# rather than eagerly here — no passphrase prompt at shell startup, and only the
+# keys you actually use end up in the agent.
+#
+# Fallback: keychain, for hosts without systemd user units.
+# Override the fallback key list with SSH_KEYS_TO_LOAD in ~/.zshrc.local
+# (sourced by 05-local-pre).
+#
+# Enable the preferred path once per host with:
+#   systemctl --user enable --now ssh-agent.socket
+
+if [[ -d "$HOME/.ssh" ]]; then
+
+  if systemctl --user -q is-enabled ssh-agent.socket 2>/dev/null; then
+    # The shipped unit carries ConditionEnvironment=!SSH_AGENT_PID and will
+    # refuse to start if a stray agent exported it, so clear it first.
+    unset SSH_AGENT_PID
+    export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/${UID}}/ssh-agent.socket"
+
+  else
+    if [[ -z "${SSH_KEYS_TO_LOAD[*]}" ]]; then
+      SSH_KEYS_TO_LOAD=()
+      for _k in id_infra id_ed25519 id_rsa; do
+        [[ -f "$HOME/.ssh/$_k" ]] && SSH_KEYS_TO_LOAD+=("$HOME/.ssh/$_k")
+      done
+      unset _k
+    fi
+
+    if command -v keychain &>/dev/null && (( ${#SSH_KEYS_TO_LOAD[@]} > 0 )); then
+      eval "$(keychain --eval --quiet "${SSH_KEYS_TO_LOAD[@]}")"
+    fi
+  fi
+
+fi

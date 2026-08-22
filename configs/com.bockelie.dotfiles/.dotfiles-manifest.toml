@@ -1,0 +1,147 @@
+# Dotfiles Manifest (TOML, ADR-003 array-of-tables).
+#
+# The sole manifest, read by the Rust `dotfiles` tool. The legacy pipe-format
+# `.dotfiles-manifest` and the bash tool that read it have been retired.
+#
+# Each [[entry]] is one managed dotfile. Required: name, path (source, relative
+# to the repo root), target (relative to $HOME). Optional: enabled (default
+# true), mode (symlink|copy, default symlink), why (the durable rationale,
+# ADR-002), and an optional structured `spec` (ADR-006).
+
+[[entry]]
+name = "tmux"
+path = "tmux/.tmux.conf"
+target = ".tmux.conf"
+why = "Terminal multiplexer config — persistent sessions and vim-style pane navigation, kept identical across machines so muscle memory carries over."
+
+[[entry]]
+name = "zsh"
+path = "zsh/.zshrc"
+target = ".zshrc"
+why = "Interactive shell baseline (prompt, history, keybindings). The reason a fresh box behaves like the others without re-deriving settings."
+
+[[entry]]
+name = "zshenv"
+path = "zsh/.zshenv"
+target = ".zshenv"
+why = "PATH/GOPATH for EVERY zsh, not just interactive ones. .zshrc (and its conf.d) is interactive-only, so shells from `ssh host cmd`, cron, systemd, and agent tool runners never composed a PATH — they inherited one from whatever spawned them, which looked correct only while an interactive ancestor existed and broke as soon as one didn't. Composing here makes a correct PATH a property of the shell rather than of its ancestry."
+spec.summary  = "Base env (PATH, GOPATH) for all zsh invocations."
+spec.concern  = "shell-bootstrap"
+spec.kind     = "env-shell-hook"
+spec.run_mode = "side-effect-free"
+
+[[entry]]
+name = "nvim"
+path = "nvim"
+target = ".config/nvim"
+why = "Neovim configuration carried whole so editing feels the same everywhere."
+
+[[entry]]
+name = "zsh-config"
+path = "zsh/.zsh"
+target = ".zsh"
+why = "Supporting zsh fragments (aliases, functions) sourced by .zshrc; split out to keep .zshrc readable."
+
+[[entry]]
+name = "oh-my-posh-themes"
+path = "oh-my-posh/themes"
+target = ".config/oh-my-posh/themes"
+why = "oh-my-posh prompt themes — the set the shell prompt can switch between."
+
+[[entry]]
+name = "posh-theme"
+path = "oh-my-posh/posh-theme"
+target = ".local/bin/posh-theme"
+why = "Helper on PATH to switch the active oh-my-posh theme."
+
+[[entry]]
+name = "tmux-menu"
+path = "tmux-menu/menus.toml"
+target = ".config/tmux-menu/menus.toml"
+why = "Declarative menu definitions for the tmux popup menu tool."
+
+[[entry]]
+name = "mlterm-fb-launcher"
+path = "mlterm/mlterm-fb"
+target = ".local/bin/mlterm-fb"
+why = "Keyboard-resolving launcher for mlterm on the bare framebuffer console; auto-started on VT login so the raw console gets a usable terminal."
+
+[[entry]]
+name = "mlterm-fontgen"
+path = "mlterm/mlterm-fontgen"
+target = ".local/bin/mlterm-fontgen"
+why = "Generates mlterm aafont config portably so glyphs render correctly on the framebuffer regardless of installed fonts."
+
+[[entry]]
+name = "mlfc-guard"
+path = "mlterm/mlfc-guard"
+target = ".local/bin/mlfc"
+why = "Guard wrapper around mlfc keeping aafont generation safe and idempotent."
+
+[[entry]]
+name = "mlterm-main"
+path = "mlterm/main"
+target = ".mlterm/main"
+why = "Core mlterm settings (font, scrollbar off, colors) for the framebuffer terminal."
+spec.concern = "terminal-bootstrap"
+
+[[entry]]
+name = "mlterm-aafont"
+path = "mlterm/aafont"
+target = ".mlterm/aafont"
+why = "mlterm anti-alias font mapping (generated); kept managed so a fresh machine has working fonts out of the box."
+spec.concern = "terminal-bootstrap"
+
+[[entry]]
+name = "mlterm-color"
+path = "mlterm/color"
+target = ".mlterm/color"
+why = "mlterm color palette."
+spec.concern = "terminal-bootstrap"
+
+[[entry]]
+name = "zprofile"
+path = "zsh/.zprofile"
+target = ".zprofile"
+why = "Login-shell profile: launches the keyboard-resolving mlterm-fb wrapper by absolute path on bare-VT console login (PATH lacks ~/.local/bin that early)."
+spec.summary  = "Auto-launch mlterm-fb on bare-VT login, guarded and lockout-proof."
+spec.concern  = "terminal-bootstrap"
+spec.kind     = "login-shell-hook"
+spec.platform = "linux-vt"
+spec.launches = ["~/.local/bin/mlterm-fb"]
+spec.run_mode = "run-not-exec"
+spec.requires.packages = ["mlterm-fb"]
+spec.requires.groups   = ["video", "input"]
+spec.requires.entries  = ["mlterm-main", "mlterm-aafont", "mlterm-color"]
+
+[[entry]]
+name = "github-backup"
+path = "github-backup/github-backup"
+target = ".local/bin/github-backup"
+why = "Disaster-recovery tool: mirror-backs up my entire GitHub profile (all repos as git --mirror, plus issues/PRs/release-notes metadata) to disk and optionally burns to DVD. Kept on every machine so any box can both produce and restore a full off-site backup; clones over HTTPS with timeout+retry so flaky ssh can't stall it."
+
+[[entry]]
+name = "claude-statusline"
+path = "claude/statusline.sh"
+target = ".claude/statusline.sh"
+why = "Status line renderer (dir, git branch, owner/repo, time). A file artifact, not a settings key: the claude/settings.d statusLine fragment points at it. Owned in dotfiles so it travels across hosts (ADR-010 / ADR-163 artifact-ownership split)."
+
+[[entry]]
+name = "tealdeer"
+path = "tealdeer/config.toml"
+target = ".config/tealdeer/config.toml"
+why = "tealdeer keeps tldr pages in a local cache, so the pages go stale silently rather than loudly — a lookup just returns yesterday's flags. auto_update turns that failure mode into a 30-day refresh. Carried per-machine because the cache is per-machine, and a fresh box would otherwise inherit the offline speed without the freshness."
+
+[[entry]]
+name = "claude-output-styles"
+path = "claude/output-styles"
+target = ".claude/output-styles"
+why = "Claude Code output styles are personal voice configuration — how Claude sounds, not how it works. Versioned here rather than in agent-ways: voice is operator taste, and the repo ships method."
+
+[profiles.north]
+
+[profiles.slab]
+
+[profiles.cube]
+
+[profiles.padnoir]

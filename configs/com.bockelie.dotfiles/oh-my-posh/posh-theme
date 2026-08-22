@@ -1,0 +1,274 @@
+#!/bin/bash
+# posh-theme — manage oh-my-posh themes (list, preview, copy, edit, set)
+
+set -euo pipefail
+
+USER_DIR="$HOME/.config/oh-my-posh/themes"
+SYS_DIR="/usr/share/oh-my-posh/themes"
+ACTIVE_FILE="$HOME/.config/oh-my-posh/active"
+
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+CYAN=$'\033[0;36m'
+RED=$'\033[0;31m'
+DIM=$'\033[2m'
+NC=$'\033[0m'
+
+active_theme() {
+    [[ -f "$ACTIVE_FILE" ]] && cat "$ACTIVE_FILE" || echo ""
+}
+
+# Resolve a theme name to a path; user dir wins over system dir.
+find_theme() {
+    local name="${1%.omp.json}"
+    if [[ -f "$USER_DIR/$name.omp.json" ]]; then
+        echo "$USER_DIR/$name.omp.json"
+        return 0
+    fi
+    if [[ -f "$SYS_DIR/$name.omp.json" ]]; then
+        echo "$SYS_DIR/$name.omp.json"
+        return 0
+    fi
+    return 1
+}
+
+cmd_list() {
+    local active
+    active="$(active_theme)"
+
+    if [[ -d "$USER_DIR" ]] && compgen -G "$USER_DIR/*.omp.json" >/dev/null; then
+        echo "${CYAN}=== User themes (${USER_DIR/#$HOME/~}) ===${NC}"
+        for f in "$USER_DIR"/*.omp.json; do
+            local name marker="  "
+            name="$(basename "$f" .omp.json)"
+            [[ "$name" == "$active" ]] && marker="${GREEN}* ${NC}"
+            echo "${marker}${name}"
+        done
+        echo
+    fi
+
+    echo "${CYAN}=== System themes (${SYS_DIR}) ===${NC}"
+    for f in "$SYS_DIR"/*.omp.json; do
+        [[ -f "$f" ]] || continue
+        local name marker="  " note=""
+        name="$(basename "$f" .omp.json)"
+        if [[ -f "$USER_DIR/$name.omp.json" ]]; then
+            note=" ${DIM}(overridden)${NC}"
+        elif [[ "$name" == "$active" ]]; then
+            marker="${GREEN}* ${NC}"
+        fi
+        echo "${marker}${name}${note}"
+    done
+}
+
+cmd_preview() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { echo "${RED}Usage: posh-theme preview <name>${NC}"; exit 1; }
+    local path
+    path="$(find_theme "$name")" || { echo "${RED}Theme not found: $name${NC}"; exit 1; }
+    echo "${CYAN}--- ${name%.omp.json} ---${NC}"
+    oh-my-posh print primary --config "$path" --shell uni --escape=false
+    echo
+}
+
+cmd_preview_all() {
+    local names=() seen=()
+
+    if [[ -d "$USER_DIR" ]]; then
+        for f in "$USER_DIR"/*.omp.json; do
+            [[ -f "$f" ]] || continue
+            local n; n="$(basename "$f" .omp.json)"
+            names+=("$n"); seen+=("$n")
+        done
+    fi
+    for f in "$SYS_DIR"/*.omp.json; do
+        [[ -f "$f" ]] || continue
+        local n; n="$(basename "$f" .omp.json)"
+        local skip=false
+        for s in "${seen[@]:-}"; do [[ "$s" == "$n" ]] && skip=true && break; done
+        $skip && continue
+        names+=("$n")
+    done
+
+    local total=${#names[@]} i=0
+    [[ $total -eq 0 ]] && { echo "${YELLOW}No themes found.${NC}"; exit 0; }
+
+    while (( i < total )); do
+        local name="${names[$i]}"
+        clear
+        echo "${CYAN}[$((i+1))/$total] $name${NC}"
+        echo
+        local path; path="$(find_theme "$name")"
+        oh-my-posh print primary --config "$path" --shell uni --escape=false || true
+        echo; echo
+        echo "${DIM}[→/n/⏎] next  [←/p] prev  [q] quit  [s] set  [c] copy${NC}"
+
+        local key="" rest=""
+        IFS= read -rsn1 key
+        # If ESC, peek for arrow-key sequence (ESC [ X). Bare ESC = quit.
+        if [[ $key == $'\e' ]]; then
+            read -rsn2 -t 0.01 rest 2>/dev/null || true
+            key+="${rest:-}"
+        fi
+
+        case "$key" in
+            q|Q|$'\e')
+                clear; break ;;
+            s|S)
+                cmd_set "$name"; break ;;
+            c|C)
+                read -rp "Copy '$name' to user dir as: " new
+                [[ -n "$new" ]] && cmd_copy "$name" "$new"
+                read -rsn1 -p "${DIM}[enter] continue${NC}" _
+                ;;
+            p|P|$'\e[D'|$'\e[A')
+                (( i > 0 )) && i=$((i-1)) ;;
+            *)
+                (( i < total - 1 )) && i=$((i+1)) ;;
+        esac
+    done
+}
+
+cmd_copy() {
+    local src="${1:-}" dst="${2:-}"
+    [[ -z "$src" || -z "$dst" ]] && {
+        echo "${RED}Usage: posh-theme copy <source-name> <new-name>${NC}"
+        exit 1
+    }
+    local src_path
+    src_path="$(find_theme "$src")" || { echo "${RED}Source not found: $src${NC}"; exit 1; }
+
+    dst="${dst%.omp.json}"
+    local dst_path="$USER_DIR/$dst.omp.json"
+
+    mkdir -p "$USER_DIR"
+
+    if [[ -e "$dst_path" ]]; then
+        echo "${YELLOW}Theme '$dst' already exists at:${NC}"
+        echo "  $dst_path"
+        read -rp "Overwrite? [y/N] " -n 1 reply; echo
+        [[ ! $reply =~ ^[Yy]$ ]] && { echo "Aborted."; exit 1; }
+    fi
+
+    cp "$src_path" "$dst_path"
+    echo "${GREEN}Copied ${src%.omp.json} -> $dst${NC}"
+    echo "  $dst_path"
+    echo
+    echo "Edit:      posh-theme edit $dst"
+    echo "Activate:  posh-theme set $dst"
+}
+
+cmd_fetch() {
+    local src="${1:-}" dst="${2:-${1:-}}"
+    [[ -z "$src" ]] && {
+        echo "${RED}Usage: posh-theme fetch <upstream-name> [as <new-name>]${NC}"
+        echo "Pulls the latest version of a theme from upstream via 'oh-my-posh config export'."
+        exit 1
+    }
+    src="${src%.omp.json}"
+    dst="${dst%.omp.json}"
+
+    mkdir -p "$USER_DIR"
+    local dst_path="$USER_DIR/$dst.omp.json"
+
+    if [[ -e "$dst_path" ]]; then
+        echo "${YELLOW}Theme '$dst' already exists at:${NC}"
+        echo "  $dst_path"
+        read -rp "Overwrite with latest upstream? [y/N] " -n 1 reply; echo
+        [[ ! $reply =~ ^[Yy]$ ]] && { echo "Aborted."; exit 1; }
+    fi
+
+    if oh-my-posh config export --config "$src" --output "$dst_path" 2>/dev/null; then
+        echo "${GREEN}Fetched upstream '$src' -> $dst${NC}"
+        echo "  $dst_path"
+    else
+        rm -f "$dst_path"
+        echo "${RED}Failed to fetch '$src' from upstream.${NC}"
+        echo "Check the name at https://ohmyposh.dev/docs/themes"
+        exit 1
+    fi
+}
+
+cmd_set() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { echo "${RED}Usage: posh-theme set <name>${NC}"; exit 1; }
+    name="${name%.omp.json}"
+    find_theme "$name" >/dev/null || { echo "${RED}Theme not found: $name${NC}"; exit 1; }
+    mkdir -p "$(dirname "$ACTIVE_FILE")"
+    echo "$name" > "$ACTIVE_FILE"
+    echo "${GREEN}Active theme: $name${NC}"
+    echo "${DIM}Restart shell or run 'exec zsh' to apply.${NC}"
+}
+
+cmd_current() {
+    local active; active="$(active_theme)"
+    if [[ -z "$active" ]]; then
+        echo "${YELLOW}No active theme set (using fallback).${NC}"
+        return 0
+    fi
+    local path
+    if path="$(find_theme "$active")"; then
+        echo "$active"
+        echo "${DIM}  $path${NC}"
+    else
+        echo "${RED}Active theme '$active' not found.${NC}"
+        exit 1
+    fi
+}
+
+cmd_edit() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { echo "${RED}Usage: posh-theme edit <name>${NC}"; exit 1; }
+    name="${name%.omp.json}"
+    local path="$USER_DIR/$name.omp.json"
+    if [[ ! -f "$path" ]]; then
+        echo "${YELLOW}'$name' is not in your user dir.${NC}"
+        echo "Copy it first:  posh-theme copy $name $name"
+        exit 1
+    fi
+    "${EDITOR:-vi}" "$path"
+}
+
+cmd_help() {
+    cat <<EOF
+${CYAN}posh-theme${NC} — manage oh-my-posh themes
+
+${YELLOW}Usage:${NC}
+    posh-theme <command> [args]
+
+${YELLOW}Commands:${NC}
+    ${GREEN}list${NC}                       Show all themes (user + system)
+    ${GREEN}preview${NC} <name>             Render a theme once
+    ${GREEN}preview-all${NC}                Step through all themes interactively
+    ${GREEN}copy${NC} <source> <new-name>   Copy a theme into your user dir
+    ${GREEN}fetch${NC} <name> [<as>]        Download latest upstream theme by name
+    ${GREEN}edit${NC} <name>                Open a user theme in \$EDITOR
+    ${GREEN}set${NC} <name>                 Set active theme
+    ${GREEN}current${NC}                    Show active theme
+    ${GREEN}help${NC}                       Show this help
+
+${YELLOW}Locations:${NC}
+    User themes:    $USER_DIR
+    System themes:  $SYS_DIR
+    Active theme:   $ACTIVE_FILE
+EOF
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    case "$cmd" in
+        list|ls)        cmd_list "$@" ;;
+        preview)        cmd_preview "${1:-}" ;;
+        preview-all)    cmd_preview_all ;;
+        copy|cp)        cmd_copy "${1:-}" "${2:-}" ;;
+        fetch)          cmd_fetch "${1:-}" "${2:-}" ;;
+        edit)           cmd_edit "${1:-}" ;;
+        set)            cmd_set "${1:-}" ;;
+        current)        cmd_current ;;
+        help|--help|-h) cmd_help ;;
+        *)              echo "${RED}Unknown command: $cmd${NC}"; cmd_help; exit 1 ;;
+    esac
+}
+
+main "$@"

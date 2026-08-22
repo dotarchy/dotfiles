@@ -1,0 +1,10 @@
+claude-code
+docker-rootless-extras
+easy-zsh-config
+greetd-tuigreet-bin
+oh-my-posh
+ox-bin
+paccache-hook
+wlogout
+yay-bin
+yay-bin-debug

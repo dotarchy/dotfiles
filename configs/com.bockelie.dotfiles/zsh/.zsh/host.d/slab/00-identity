@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# slab — work laptop
+DOTFILES_HOST=slab
+
+# Auto-update knob (days). Comment out to disable.
+# DOTFILES_AUTO_UPDATE_DAYS=14

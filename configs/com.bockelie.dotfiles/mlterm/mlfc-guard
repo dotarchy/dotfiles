@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# mlfc guard — shadows /usr/bin/mlfc on $PATH (via ~/.local/bin) to stop a bare
+# `mlfc` run from clobbering your tracked ~/.mlterm/aafont.
+#
+# mlfc rewrites aafont (and font-fb) from scratch with no concept of your
+# DEFAULT font or your dotfiles symlink. Use `mlterm-fontgen`, which runs the
+# real mlfc sandboxed and updates the tracked config safely.
+#
+# Escape hatches (when you really mean it):
+#   MLTERM_FONTGEN=1 mlfc <Font>     # run the real mlfc through this shim
+#   /usr/bin/mlfc <Font>             # call the real binary directly
+set -euo pipefail
+
+if [ "${MLTERM_FONTGEN:-}" = "1" ]; then
+  exec /usr/bin/mlfc "$@"
+fi
+
+cat >&2 <<'MSG'
+mlfc is guarded: running it directly would overwrite your tracked
+~/.mlterm/aafont (erasing your DEFAULT font and breaking dotfiles tracking).
+
+Use instead:
+    mlterm-fontgen              # regenerate the fallback table from your intent
+    mlterm-fontgen "Some Font"  # switch primary font, then regenerate
+
+To bypass this guard on purpose:
+    MLTERM_FONTGEN=1 mlfc ...   or   /usr/bin/mlfc ...
+MSG
+exit 1

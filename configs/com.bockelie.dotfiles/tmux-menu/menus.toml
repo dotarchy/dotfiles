@@ -1,0 +1,74 @@
+# tmux-menu — default menu structure.
+#
+# This is the engine's built-in fallback. Your editable copy lives at
+#   $XDG_CONFIG_HOME/tmux-menu/menus.toml   (i.e. ~/.config/tmux-menu/menus.toml)
+# and is tracked in dotfiles, so you change menus there without touching code.
+#
+# Schema:
+#   [[menu]]            title, mnemonic, then a list of [[menu.item]]
+#   [[menu.item]]       label + run = [tmux, args...]   — or   separator = true
+#   {cwd} in a run arg is replaced with the calling pane's directory.
+
+[[menu]]
+title = "File"
+mnemonic = "f"
+  [[menu.item]]
+  label = "New Window"
+  run = ["new-window", "-c", "{cwd}"]
+  [[menu.item]]
+  label = "Split Right"
+  run = ["split-window", "-h", "-c", "{cwd}"]
+  [[menu.item]]
+  label = "Split Down"
+  run = ["split-window", "-v", "-c", "{cwd}"]
+  [[menu.item]]
+  separator = true
+  [[menu.item]]
+  label = "Close Pane"
+  run = ["kill-pane"]
+  [[menu.item]]
+  label = "Close Window"
+  run = ["kill-window"]
+  [[menu.item]]
+  separator = true
+  [[menu.item]]
+  label = "Detach"
+  run = ["detach-client"]
+
+[[menu]]
+title = "Edit"
+mnemonic = "e"
+  [[menu.item]]
+  label = "Copy Mode"
+  run = ["copy-mode"]
+  [[menu.item]]
+  label = "Paste"
+  run = ["paste-buffer", "-p"]
+
+[[menu]]
+title = "View"
+mnemonic = "v"
+  [[menu.item]]
+  label = "Layout Horizontal"
+  run = ["select-layout", "even-horizontal"]
+  [[menu.item]]
+  label = "Layout Vertical"
+  run = ["select-layout", "even-vertical"]
+  [[menu.item]]
+  label = "Layout Tiled"
+  run = ["select-layout", "tiled"]
+  [[menu.item]]
+  separator = true
+  [[menu.item]]
+  label = "Zoom Pane"
+  run = ["resize-pane", "-Z"]
+
+[[menu]]
+title = "Window"
+mnemonic = "w"
+  [[menu.item]]
+  label = "Next"
+  run = ["next-window"]
+  [[menu.item]]
+  label = "Previous"
+  run = ["previous-window"]
