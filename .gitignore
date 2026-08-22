@@ -29,6 +29,10 @@ zsh/.zsh/easy-zsh-config-removed-*/
 # Local dev checkout of the Rust CLI source (installed as a release binary, not a submodule)
 /dotfiles-tui/
 
+# Machine-local settings that must never be committed (ADR-012): where this
+# machine keeps its package lists. Sibling to .dotfiles-profile below.
+.dotfiles-local.toml
+
 # Machine-specific active profile marker (set by `dotfiles profile use`)
 .dotfiles-profile
 /pacrat/
