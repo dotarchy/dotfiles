@@ -1,12 +1,12 @@
-# Dotfiles Manifest (TOML, ADR-003 array-of-tables).
+# Dotfiles Manifest (TOML array-of-tables).
 #
 # The sole manifest, read by the Rust `dotfiles` tool. The legacy pipe-format
 # `.dotfiles-manifest` and the bash tool that read it have been retired.
 #
 # Each [[entry]] is one managed dotfile. Required: name, path (source, relative
 # to the repo root), target (relative to $HOME). Optional: enabled (default
-# true), mode (symlink|copy, default symlink), why (the durable rationale,
-# ADR-002), and an optional structured `spec` (ADR-006).
+# true), mode (symlink|copy, default symlink), why (the durable rationale),
+# and an optional structured `spec`.
 
 [[entry]]
 name = "tmux"
@@ -124,7 +124,7 @@ why = "Disaster-recovery tool: mirror-backs up my entire GitHub profile (all rep
 name = "claude-statusline"
 path = "claude/statusline.sh"
 target = ".claude/statusline.sh"
-why = "Status line renderer (dir, git branch, owner/repo, time). A file artifact, not a settings key: the claude/settings.d statusLine fragment points at it. Owned in dotfiles so it travels across hosts (ADR-010 / ADR-163 artifact-ownership split)."
+why = "Status line renderer (dir, git branch, owner/repo, time). A file artifact, not a settings key: the claude/settings.d statusLine fragment points at it. Owned in dotfiles so it travels across hosts (artifact-ownership split)."
 
 [[entry]]
 name = "tealdeer"

@@ -1,4 +1,4 @@
-# The dotfiles registry index (dotfiles-cli ADR-013). One row per published
+# The dotfiles registry index. One row per published
 # configuration; the content lives in configs/<id>/. Ids are reverse-DNS and
 # the domain half is the owner's.
 

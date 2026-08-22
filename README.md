@@ -34,4 +34,4 @@ engine scripts; those belong to the store. Every entry keeps a `why` on each
 manifest row, and where it builds on someone else's work the `why` names the
 upstream.
 
-Design: dotfiles-cli ADR-013.
+Design: [ADR-013](https://github.com/dotarchy/dotfiles-cli/blob/main/docs/architecture/foundation/) in dotfiles-cli.

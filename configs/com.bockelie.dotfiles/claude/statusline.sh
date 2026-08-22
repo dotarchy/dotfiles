@@ -11,7 +11,7 @@ TIME=$(date +%H:%M)
 
 # Get attend agent name if this session is enrolled (attend running).
 # CLI is the contract: read sanctioned attend surfaces, never attend-owned
-# state. Prefer `attend whoami` (ADR-171): its display name derives from the
+# state. Prefer `attend whoami`: its display name derives from the
 # session record's origin path, so it stays stable when the shell's cwd
 # wanders (the `attend peers` self-row keys on live process cwd and would
 # drift — e.g. rendering a tools/-flavored persona after a stray `cd`).

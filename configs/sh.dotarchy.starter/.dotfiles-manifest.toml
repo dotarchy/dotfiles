@@ -1,7 +1,7 @@
-# sh.dotarchy.starter — a working, unremarkable, nobody's setup (ADR-013).
+# sh.dotarchy.starter — a working, unremarkable, nobody's setup.
 #
 # The registry entry a fresh host starts from. Each entry keeps its real
-# `why` (ADR-002). Profiles and variants are the store's business.
+# `why`. Profiles and variants are the store's business.
 
 [[entry]]
 name = "tmux"
