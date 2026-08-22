@@ -1,0 +1,33 @@
+# sh.dotarchy.starter — a working, unremarkable, nobody's setup (ADR-013).
+#
+# The registry entry a fresh host starts from. Each entry keeps its real
+# `why` (ADR-002). Profiles and variants are the store's business.
+
+[[entry]]
+name = "tmux"
+path = "tmux/.tmux.conf"
+target = ".tmux.conf"
+why = "Terminal multiplexer config — persistent sessions and vim-style pane navigation, kept identical across machines so muscle memory carries over."
+
+[[entry]]
+name = "zsh"
+path = "zsh/.zshrc"
+target = ".zshrc"
+why = "Interactive shell baseline (prompt, history, keybindings). The reason a fresh box behaves like the others without re-deriving settings."
+
+[[entry]]
+name = "zshenv"
+path = "zsh/.zshenv"
+target = ".zshenv"
+why = "PATH/GOPATH for EVERY zsh, not just interactive ones. .zshrc (and its conf.d) is interactive-only, so shells from `ssh host cmd`, cron, systemd, and agent tool runners never composed a PATH — they inherited one from whatever spawned them, which looked correct only while an interactive ancestor existed and broke as soon as one didn't. Composing here makes a correct PATH a property of the shell rather than of its ancestry."
+spec.summary  = "Base env (PATH, GOPATH) for all zsh invocations."
+spec.concern  = "shell-bootstrap"
+spec.kind     = "env-shell-hook"
+spec.run_mode = "side-effect-free"
+
+[[entry]]
+name = "zsh-config"
+path = "zsh/.zsh"
+target = ".zsh"
+why = "Supporting zsh fragments (aliases, functions) sourced by .zshrc; split out to keep .zshrc readable."
+

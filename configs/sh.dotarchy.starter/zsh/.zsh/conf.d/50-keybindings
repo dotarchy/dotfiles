@@ -1,0 +1,45 @@
+#!/usr/bin/env zsh
+# Keybindings (emacs-mode base + terminal-specific fixes)
+
+bindkey -e
+
+# Home / End across terminals
+bindkey '^[[7~' beginning-of-line
+bindkey '^[[H'  beginning-of-line
+[[ -n "${terminfo[khome]}" ]] && bindkey "${terminfo[khome]}" beginning-of-line
+bindkey '^[[8~' end-of-line
+bindkey '^[[F'  end-of-line
+[[ -n "${terminfo[kend]}" ]]  && bindkey "${terminfo[kend]}"  end-of-line
+
+# Insert / Delete / arrows
+bindkey '^[[2~' overwrite-mode
+bindkey '^[[3~' delete-char
+bindkey '^[[C'  forward-char
+bindkey '^[[D'  backward-char
+
+# Up/Down → history-substring-search (from 40-plugins)
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+
+# Ctrl-Up / Ctrl-Down → prefix-search
+bindkey ';5A'    history-beginning-search-backward
+bindkey ';5B'    history-beginning-search-forward
+bindkey '^[[1;5A' history-beginning-search-backward
+bindkey '^[[1;5B' history-beginning-search-forward
+
+# Ctrl-Left / Ctrl-Right → word jump
+bindkey '^[Oc'    forward-word
+bindkey '^[Od'    backward-word
+bindkey '^[[1;5D' backward-word
+bindkey '^[[1;5C' forward-word
+
+# Ctrl-Backspace → delete previous word
+bindkey '^H' backward-kill-word
+# Shift-Tab → undo
+bindkey '^[[Z' undo
+
+# Ctrl-Space → take the whole ghost suggestion without reaching for End.
+# Right Arrow and End already accept it (autosuggestions wraps forward-char and
+# end-of-line), and Ctrl-Left/Right take it one word at a time. Guarded on the
+# widget so a box without the plugin package installed still starts clean.
+(( ${+widgets[autosuggest-accept]} )) && bindkey '^ ' autosuggest-accept

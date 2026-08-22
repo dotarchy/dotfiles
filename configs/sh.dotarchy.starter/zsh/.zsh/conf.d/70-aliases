@@ -1,0 +1,49 @@
+#!/usr/bin/env zsh
+# Aliases and small helper functions.
+# These are normal (not global) aliases — safer than alias -g, which expands
+# the word anywhere on the command line including inside pipelines and flags.
+
+# Interactive conveniences only. Skip them for agent/automation shells (Claude Code
+# et al. set CLAUDECODE / AI_AGENT) and for any non-interactive shell: lsd/bat/
+# color-flag output and `cp -i` prompts break programmatic parsing and hang
+# automation. NB: agent tools source .zshrc in an interactive context, so the env
+# vars — not `-o interactive` — are what reliably catches them. Your terminal is
+# unaffected (no agent vars set, interactive → aliases load normally).
+[[ -n "$CLAUDECODE" || -n "$AI_AGENT" ]] && return
+[[ -o interactive ]] || return
+
+# Core sanity
+alias cp='cp -i'
+alias df='df -h'
+alias free='free -h'
+
+# Modern replacements for core tools
+alias ls='lsd_with_hint'
+alias cat='bat'
+alias man='batman'
+alias pretty='prettybat'
+alias ip='ip -c'
+
+# Git convenience
+alias gitu='git add . && git commit && git push'
+
+# Remote tmux resume — your 'ssh user@host' habit, but it attaches (or creates)
+# a persistent tmux session on the far end, so you can disconnect and pick up
+# right where you left off. Detach with the menu (File -> Detach) or  prefix d.
+#   smux user@host            → attach/create session 'main' on host
+#   sshmux user@host          → same thing, longer name (keep whichever you use)
+#   smux -p 2222 user@host    → any ssh flags pass straight through
+smux() {
+  # Force a UTF-8 locale on the remote so tmux renders nerd-font glyphs.
+  # ssh doesn't forward $LANG and command-exec skips /etc/locale.conf, so without
+  # this tmux starts in C/POSIX and mangles Private-Use glyphs into '_'.
+  ssh -t "$@" "LANG='${LANG:-en_US.UTF-8}' tmux new-session -A -s main"
+}
+alias sshmux='smux'
+
+lsd_with_hint() {
+  /usr/bin/lsd "$@"
+  if /usr/bin/lsd -1 "$@" 2>/dev/null | grep -qE '\.(jpe?g|png|gif|bmp|tiff|webp|svg)$'; then
+    echo "Hint: 'lsix' to see image thumbnails"
+  fi
+}

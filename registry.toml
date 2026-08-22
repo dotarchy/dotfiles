@@ -1,0 +1,11 @@
+# The dotfiles registry index (dotfiles-cli ADR-013). One row per published
+# configuration; the content lives in configs/<id>/. Ids are reverse-DNS and
+# the domain half is the owner's.
+
+[configs."sh.dotarchy.starter"]
+cli = ">=0.8.0"
+description = "A working, unremarkable, nobody's setup — the default for a fresh host."
+
+[configs."com.bockelie.dotfiles"]
+cli = ">=0.8.0"
+description = "Aaron Bockelie's configuration: zsh + oh-my-posh, tmux, nvim, mlterm console, Claude Code settings."

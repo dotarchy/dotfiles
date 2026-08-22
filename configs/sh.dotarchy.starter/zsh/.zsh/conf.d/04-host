@@ -1,0 +1,13 @@
+#!/usr/bin/env zsh
+# Source the per-host overlay if one exists for this machine.
+# Hosts live at zsh/.zsh/host.d/<hostname>/ and are tracked in the repo.
+# A registered host can stay identity-only — just sets $DOTFILES_HOST.
+
+ZSH_HOSTD="$HOME/.zsh/host.d/${HOST%%.*}"
+if [[ -d "$ZSH_HOSTD" ]]; then
+  for _f in "$ZSH_HOSTD"/*(.N); do
+    [[ -r "$_f" ]] && source "$_f"
+  done
+  unset _f
+fi
+unset ZSH_HOSTD

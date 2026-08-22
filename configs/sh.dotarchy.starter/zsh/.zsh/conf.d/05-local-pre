@@ -1,0 +1,5 @@
+#!/usr/bin/env zsh
+# Machine-local early overrides: theme path, SSH_KEYS_TO_LOAD, extra PATH entries.
+# Runs before prompt/ssh-agent so later fragments pick up its values.
+
+[[ -r "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"

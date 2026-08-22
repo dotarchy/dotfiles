@@ -1,0 +1,32 @@
+#!/usr/bin/env zsh
+# Prompt: oh-my-posh with a fallback.
+#
+# Theme resolution: ~/.config/oh-my-posh/active (set by `posh-theme set`)
+# names a theme; resolved against ~/.config/oh-my-posh/themes/ then
+# /usr/share/oh-my-posh/themes/. Defaults to kushal. The active file always
+# wins over a pre-existing $PATH_OF_THE_THEME (which Arch's /etc/zsh/zshrc
+# sets to atomic by default).
+
+_posh_name=""
+[[ -r "$HOME/.config/oh-my-posh/active" ]] && _posh_name="$(<"$HOME/.config/oh-my-posh/active")"
+: "${_posh_name:=kushal}"
+
+PATH_OF_THE_THEME=""
+for _candidate in \
+  "$HOME/.config/oh-my-posh/themes/${_posh_name}.omp.json" \
+  "/usr/share/oh-my-posh/themes/${_posh_name}.omp.json"; do
+  if [[ -r "$_candidate" ]]; then
+    PATH_OF_THE_THEME="$_candidate"
+    break
+  fi
+done
+unset _posh_name _candidate
+
+if [[ -r "${PATH_OF_THE_THEME:-}" ]] && command -v oh-my-posh &>/dev/null; then
+  export POSH_THEME="$PATH_OF_THE_THEME"
+  eval "$(oh-my-posh init zsh --config "$PATH_OF_THE_THEME")"
+else
+  autoload -U promptinit
+  promptinit
+  prompt elite2 green yellow
+fi
